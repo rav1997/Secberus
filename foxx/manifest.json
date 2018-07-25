@@ -1,0 +1,12 @@
+{
+  "engines": {
+    "arangodb": "^3.0.0"
+  },
+  "main": "index.js",
+  "scripts": {
+    "setup": "scripts/setup.js",
+    "execute-scheduler": "scripts/execute-scheduler.js",
+    "task-processor": "scripts/task-processor.js",
+    "task-puller": "scripts/task-puller.js"
+  }
+}

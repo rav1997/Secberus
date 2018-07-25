@@ -1,0 +1,9 @@
+[
+  {
+     "model": "company.companyaccount",
+     "fields": {
+        "id": 1,
+        "name": "Secberus"
+     }
+   }
+]
