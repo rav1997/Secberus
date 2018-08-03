@@ -9,7 +9,8 @@ try {
       role_arn: argv[0].role_arn,
       service: argv[0].service,
       user_id: argv[0].user_id,
-      interval_id: argv[0].interval_id
+      interval_id: argv[0].interval_id,
+      account_id: argv[0].account_id
     }
   });
 } catch(e) {

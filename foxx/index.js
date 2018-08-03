@@ -10,15 +10,28 @@ const queue = queues.create('puller-scheduler');
 const process_queue = queues.create('task-processor');
 const db = require('@arangodb').db;
 
+
+const camelize = function camelize(str) {
+  return str.replace(/[_-]+(.)/g, function(match, chr) {
+    return chr.toUpperCase();
+  });
+}
+const ucFirst = function ucFirst(str) {
+    return str.charAt(0).toUpperCase() + str.slice(1);
+}
 // Start execution of puller
 router.get('/execute/:id/:user_id/:mode', function (req, res) {
   if (!db._collection("ScheduleIntervalSettings").exists(req.pathParams.id)) {
-    res.send('settings does not exist with the given id');
+    throw 'settings does not exist with the given id';
   } else {
     try {
       var interval_obj = db._collection("ScheduleIntervalSettings").document(req.pathParams.id)
       var account_obj = db._collection("AwsCredentials").document(interval_obj.account_id)
       if (req.pathParams.mode == "edit") {
+        var query = 'FOR doc IN Jobs\
+                    FILTER doc.foxx_job_id == "'+interval_obj.foxx_job_id+'"\
+                      UPDATE doc WITH { foxx_status: "complete"} IN Jobs'
+        db._query(query)
         queue.delete(interval_obj.foxx_job_id)
       }
 
@@ -44,14 +57,14 @@ router.get('/execute/:id/:user_id/:mode', function (req, res) {
               const db = require('@arangodb').db;
               result_body = JSON.parse(result.body)
               // Inserting data into collection
-              job_exist = db._collection("Jobs").firstExample("foxx_job_id", job._id)
+              var job_exist = db._collection("Jobs").firstExample("foxx_job_id", job._id)
               if (job_exist != null) {
                 data = {
                   "celery_job_id": result_body.task_id,
                   "time_ran": result_body.time_ran,
                   "celery_status": result_body.state
                 }
-                query = 'FOR doc IN Jobs\
+                var query = 'FOR doc IN Jobs\
                             FILTER doc._id == "'+job_exist._id+'"\
                               UPDATE doc WITH { celery: APPEND(doc.celery, '+JSON.stringify(data)+')} IN Jobs'
                 db._query(query)
@@ -75,9 +88,9 @@ router.get('/execute/:id/:user_id/:mode', function (req, res) {
       db._collection("ScheduleIntervalSettings").update(req.pathParams.id, {
         "foxx_job_id": job
       })
-      res.send({'status': true, 'job_id': job})
+      res.send(job)
     } catch(e) {
-      res.send({'status': false, 'msg': e})
+      throw e
     }
   }
 })
@@ -225,6 +238,7 @@ router.post('/puller', function (req, res) {
         role_arn: req.body.role_arn,
         service: req.body.service,
         user: req.body.user,
+        account_id: req.body.account_id
       },
       {
           success: function(result, jobData, job) {
@@ -259,6 +273,7 @@ router.post('/puller', function (req, res) {
   role_arn: joi.string().required(),
   service: joi.string().required(),
   user: joi.number().required(),
+  account_id: joi.string().required(),
 }))
 .summary('Task Puller')
 .description('The POST API that will hit Puller');
@@ -272,6 +287,8 @@ router.post('/update-state', function (req, res) {
   var status = req.body.celery_status
   var host = req.body.puller_host
   var reason = req.body.reason
+  var account_id = req.body.account_id
+
   try {
     var data = reason != undefined ? 'MERGE(element, { celery_status: "'+status+'", puller_host: "'+host+'", reason: "'+reason+'" })' : 'MERGE(element, { celery_status: "'+status+'", puller_host: "'+host+'" })'
     if (id != '') {
@@ -291,8 +308,42 @@ router.post('/update-state', function (req, res) {
                             return document._id'
     }
     db._query(query_line)
+    var service_obj = JSON.parse(req.body.service_response)
+    if (service_obj.status == true) {
+      service_obj.msg.forEach(function(key) {
+        // Check for collection with the given name exist or create new if not exist
+        const collection_name = camelize(ucFirst(key.service)+"_"+key.service_endpoint)
+        if (!db._collection(collection_name)) {
+          db._createDocumentCollection(collection_name);
+        }
+        // Filtering data to check the hash saved againg a service and endpoint
+        var data_obj = db._query("For data IN "+collection_name+"\
+                        FILTER data.service_endpoint == '"+key.service_endpoint+"'\
+                        AND data.service == '"+key.service+"' AND data.account_id == '"+account_id+"'\
+                        RETURN {'hash': data.hash }").toArray();
+        // Comparing hash, If hash already exist in database
+        // Not inserting new data in collection
+        var insert_flag = true
+        data_obj.every(function(value, index, _arr) {
+          if (value.hash == key.hash) {
+            insert_flag = false;
+            return false
+          }
+        })
+        if(insert_flag) {
+          db._collection(collection_name).insert({
+            "service_endpoint": key.service_endpoint,
+            "service": key.service,
+            "account_id": account_id,
+            "hash": key.hash,
+            "data": key.data
+          })
+        }
+      })
+    }
     res.status(200).json({'msg': true})
   } catch(e) {
+    console.log(e)
     res.status(400).json({'msg': e})
   }
 })
@@ -303,6 +354,8 @@ router.post('/update-state', function (req, res) {
   celery_status: joi.string().required(),
   puller_host: joi.string().required(),
   reason: joi.string().optional(),
+  service_response: joi.required(),
+  account_id: joi.string().optional(),
 }))
 .summary('Puller State Update')
 .description('The POST API update the state of Jobs');

@@ -10,6 +10,7 @@ try {
       service: argv[0].service,
       user_id: argv[0].user,
       interval_id: '',
+      account_id: argv[0].account_id
     }
   });
 } catch(e) {
@@ -17,5 +18,3 @@ try {
   throw e
 }
 module.exports = response
-
-// Added by another developer
