@@ -33,4 +33,4 @@ simplejson==3.15.0
 six==1.11.0
 slumber==0.7.1
 uritemplate==3.0.0
-urllib3==1.22
+urllib3==1.26.5
